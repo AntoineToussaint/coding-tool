@@ -6,6 +6,8 @@ For batched code-edit tasks, **the provider tool-use API forces a "~1 call per r
 
 This is a property of the *protocol*, not the model.
 
+> This is one of two findings about the canonical `tool_use` API that point the same direction. See **[Generic conclusion](#generic-conclusion-tool_use-is-the-wrong-shape-in-two-directions)** below for the combined story with the sister study on catalog-size scaling.
+
 ## The pattern
 
 When asked to do a multi-step edit in single-shot tool-use mode, frontier models reliably:
@@ -207,3 +209,81 @@ If your task involves emitting **3+ coordinated operations in one shot**, run bo
 - Token cost per successful task
 
 We measured a clear protocol gap on our 14-task medium suite. Run it on yours.
+
+## Generic conclusion: tool_use is the wrong shape in two directions
+
+The single-call ceiling above is one of two independent failure modes of the canonical `tool_use` API at production scale. A parallel study ([tool-selection](https://github.com/AntoineToussaint/tool-selection), May 2026) measured the other one: **catalog-size bloat**.
+
+| Axis | Failure mode | Mitigation | Measured by |
+|---|---|---|---|
+| **Scaling out** — catalog size | Every tool's schema lives in context. Cache invalidates on any tool-set change. Past ~40 tools, selection accuracy degrades and per-request cost grows linearly. | **Two-phase**: a cheap model selects relevant tools first; a smart model generates arguments for one tool at a time. | [`tool-selection`](https://github.com/AntoineToussaint/tool-selection) |
+| **Scaling up** — multi-step batches | Model emits ~1 `tool_use` block per response regardless of how many operations the task needs. Plan-first prompting does not rescue this. | **Structured output**: emit the full operation set as a JSON document in plain text. Parse + apply. Bypass `tool_use` for the batched stretch. | this repo |
+
+Both studies independently observed the **Sonnet 4.6 one-call regression** ([anthropic-sdk-typescript#956](https://github.com/anthropics/anthropic-sdk-typescript/issues/956)) and verified that **plan-first prompting cannot fix it** — the behavior is structural to the tool_use protocol, not in the system prompt.
+
+### Quantified, in one matrix
+
+Combining both studies (numbers approximate, see source repos for exact methodology):
+
+| | `tool_use` (canonical) | structured / two-phase | factor |
+|---|---:|---:|---:|
+| Pass@1 on multi-step edits (Sonnet 4.6) | 57% | **100%** | **+43pp** |
+| Cost-per-success at 150 tools (Haiku 4.5) | $0.055 | **$0.014** | **~4× cheaper** |
+| Model-resilience spread on 14 tasks | 43pp (50→93%) | **14pp (86→100%)** | **~3× less model-dependent** |
+
+### The compound shape
+
+These aren't unrelated bugs. They're the same root cause showing up at two different boundaries:
+
+```
+tool_use API design assumption:
+  "Each model response is one discrete action that produces a result
+   the model needs before deciding the next action."
+
+Production reality (axis 1 — many tools):
+  The model has 80+ candidate tools available at any moment. Loading them
+  all costs tokens regardless of which one fires. Tool definitions live
+  at the top of context — cache-hostile to any dynamic selection.
+
+Production reality (axis 2 — known multi-step plans):
+  The model already knows its full N-step plan (it just wrote it in
+  assistant text). There's no information that "wait for tool result"
+  would add. But the trained reflex returns ~1 call per response.
+
+In both cases the canonical API forces the model to roundtrip when a
+single concentrated output would do.
+```
+
+### What production systems actually do
+
+Mature systems have already evolved past the canonical pattern, independently of each other:
+
+- **Aider, Cursor, OpenAI Codex CLI**: edits as text documents (SEARCH/REPLACE blocks, code-fence + apply model, `*** Begin Patch` envelopes). Bypasses `tool_use` for the batched output.
+- **Anthropic's Tool Search Tool, AgentFlux, HyFunc, RAG-MCP**: two-phase tool selection. Bypasses `tool_use` for the wide catalog.
+- **Both together** in agent frameworks like Sweep, Cline, OpenRewrite: selection happens server-side; edits happen as text emissions; only narrow status/control calls use `tool_use`.
+
+The empirical pattern is clear: **`tool_use` is correct for the shape it was designed for — a single, well-known action whose result the model needs before continuing.** For batched plans, frame edits as a structured text document. For wide catalogs, frame selection as a separate cheaper pass. The "obvious" path of "expose everything via `tool_use` and let the model figure it out" is the wrong design at production scale on both axes.
+
+### Practical decision tree
+
+If you are building an LLM agent system today:
+
+```
+Catalog size > ~30 tools?
+  └── YES: use two-phase selection (cheap model + smart model)
+  └── NO: tool_use catalog is fine
+
+Single response needs to emit > 2 coordinated operations?
+  └── YES: use structured text output (JSON change-set or SEARCH/REPLACE blocks)
+  └── NO: tool_use is fine
+
+If either YES — do NOT expect prompt engineering to overcome the structural bias.
+The provider's tool_use training is doing what it was trained for; you need to
+side-step the protocol, not argue with it.
+```
+
+### Open questions
+
+- Does GPT-5 / Gemini 3 / open-weight models exhibit the same single-call reflex? We tested only Anthropic. The Sonnet 4.6 regression is the strongest single-call bias we observed; Opus 4.7 partly trains it out (1.6 avg calls per response).
+- Does the structured-output workaround degrade as the change-set grows past ~20 operations? Untested.
+- Can a custom fine-tune put both fixes inside the canonical `tool_use` API? Likely yes — this is fundamentally a training-distribution problem, not a fundamental API limit. But until that fine-tune ships, the workarounds are the right pattern.
