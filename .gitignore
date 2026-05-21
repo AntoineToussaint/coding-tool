@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+
+# Virtual envs
+.venv
+
+# Secrets
+.env
+.env.local
+
+# Session / agent artifacts
+.claude/
+
+# Per-trial transcripts (large, regenerable). Keep sweep.csv + sweep.md.
+results/**/transcripts/
+results/transcripts/
