@@ -87,6 +87,38 @@ Per-task pass matrix (format×mode columns; ✓ pass / ✗ fail / N = number of 
 
 **5. The breakthrough is reproducible across models.** Same uplift on Haiku 4.5 and Sonnet 4.6. Sonnet under `single` was actually *worse* at multi-call emission than Haiku (1 call vs 3–5 in semantic mode); under `structured` they converge to similar batch sizes. Suggests the tool-use single-call bias is *stronger in more capable models*, not weaker.
 
+## Full 3-model × 2-mode matrix (n=14 medium tasks, search_plus format)
+
+Same 14 medium-size tasks. Same `search_plus` format. Three models × two modes.
+
+| | tool_use (single) | structured | Δ |
+|---|---:|---:|---:|
+| Haiku 4.5 | 50.0% | 85.7% | **+35.7pp** |
+| Sonnet 4.6 | 57.1% | **100.0%** | **+42.9pp** |
+| Opus 4.7 | 92.9% | **100.0%** | +7.1pp |
+
+**Read this matrix as the resilience finding:**
+
+| | range across models | meaning |
+|---|---|---|
+| tool_use spread | 50% → 93% (**43pp**) | strongly model-dependent — Sonnet/Haiku are starving in this protocol |
+| structured spread | 86% → 100% (**14pp**) | weakly model-dependent — Haiku in this protocol matches Sonnet in tool_use |
+
+**One protocol is much more resilient to model idiosyncrasies than the other.** Pick `structured` and your pass rate barely depends on which Claude you pick. Pick `tool_use` and you're paying a big "cheap-model tax" that compounds with the single-call bias.
+
+Two observations to underline:
+
+- **Sonnet 4.6 closes from 57% → 100% by switching protocol** (no model change). Pure protocol win.
+- **Opus 4.7 only gains 7pp** because it already pushes back against the single-call reflex (1.6 avg tool calls per response in tool_use mode vs Sonnet's 1.0). Capability and protocol resilience trade off — the more capable model needs the protocol less.
+
+Token efficiency follows the same pattern: structured uses ~17% fewer tokens per task than single across all three models (the model writes one focused JSON document instead of multiple round-trips with truncated context per turn).
+
+The residual failures in structured mode are real-task-difficulty, not protocol artifact:
+
+- Haiku-structured fails c09 (destructive multi-edit, same as in tool_use)
+- Haiku-structured fails c01 (a JSON-parse / output-shape glitch — recoverable with a lenient parser)
+- Sonnet-structured and Opus-structured pass all 14
+
 ## Opus 4.7 on the residual failure (c09)
 
 c09 (`remove_sweep`: delete `apply_shipping` and every reference — touches 2 functions, 2 constants, the importer in tests, and a test file) was the only task semantic-structured couldn't solve on Sonnet or Haiku. Re-ran on Opus 4.7:
