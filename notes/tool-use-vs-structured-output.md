@@ -87,6 +87,34 @@ Per-task pass matrix (format×mode columns; ✓ pass / ✗ fail / N = number of 
 
 **5. The breakthrough is reproducible across models.** Same uplift on Haiku 4.5 and Sonnet 4.6. Sonnet under `single` was actually *worse* at multi-call emission than Haiku (1 call vs 3–5 in semantic mode); under `structured` they converge to similar batch sizes. Suggests the tool-use single-call bias is *stronger in more capable models*, not weaker.
 
+## Opus 4.7 on the residual failure (c09)
+
+c09 (`remove_sweep`: delete `apply_shipping` and every reference — touches 2 functions, 2 constants, the importer in tests, and a test file) was the only task semantic-structured couldn't solve on Sonnet or Haiku. Re-ran on Opus 4.7:
+
+| format | mode | pass | calls | tokens |
+|---|---|:---:|:---:|---:|
+| search_replace | single | ✗ | 2 | 8.2k |
+| search_replace | structured | ✓ | 3 | 8.2k |
+| semantic | single | ✗ | 1 | 6.0k |
+| **semantic** | **structured** | **✗** | **6** | 8.9k |
+| search_plus | single | ✓ | 3 | 9.8k |
+| search_plus | structured | ✓ | 3 | 8.4k |
+
+Three observations:
+
+**Opus pushes back against the single-call reflex more than Sonnet.** Opus single-mode `search_plus` emits 3 tool calls and passes. Sonnet always emits 1. Suggests the bias varies by model and Opus is partially trained out of it.
+
+**`search_plus` single-shot is the first cell to pass c09 in non-structured mode** across any model. The hybrid (text-replace + `rename`/`move`/`change_value_of`) gave Opus enough text-edit breadth to pack the multi-edit chunks while still expressing the renames atomically.
+
+**Semantic structured still fails on c09 even with Opus emitting 6 ops.** This isolates a real format-level finding: **destructive multi-edit tasks decompose poorly into atomic semantic ops.** Each of the 6 things needed (`remove function`, `remove constant` × 2, `replace function body` × 2, `update test imports`) is a distinct atomic op. The model has to enumerate every one without missing any. `search_replace` and `search_plus` solved the same task with 3 calls because one big `str_replace` packs multiple chunk-level changes in pricing.py simultaneously.
+
+The asymmetry:
+
+- **Additive multi-edit** tasks (`add this function, add this route, update this import`): both atomic semantic ops and text-chunk replacements work in structured mode, because each edit has a clean local target.
+- **Destructive multi-edit** tasks (`remove this and every reference`): text-chunk replacement is materially better, because chunking lets the model rewrite multiple co-located edits at once without enumerating each.
+
+Atomic ops are like Lisp's "do one thing" primitives. Chunk replacement is like sed across a region. For pure refactors over named entities (rename, move) atomic wins. For tear-out edits, chunked text wins.
+
 ## Why this happens
 
 Tool-use is trained on a **multi-turn action-feedback loop**:
