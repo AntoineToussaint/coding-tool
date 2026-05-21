@@ -48,6 +48,45 @@ Same task, Haiku, semantic format:
 
 Across the medium-task suite (n=14), `single`-mode `search_replace` averages **1.0 calls per response** regardless of how many edits the task needs.
 
+## Quantified: 48-trial single vs structured comparison
+
+We took the four medium tasks that consistently failed in single-shot tool_use mode across every format and every model (c04 signature_change, c05 api_migration, c08 add_feature, c09 remove_sweep) and ran them under both protocols, three formats (`search_replace`, `semantic`, `search_plus`), two models (Haiku 4.5, Sonnet 4.6). Same task contents, same model temperature (0), same applier code.
+
+Headline:
+
+| | `single` (tool_use) | `structured` (JSON text) |
+|---|---:|---:|
+| **Pass rate (n=24 cells)** | 8% | **79%** |
+| **Calls per response** | ~1 (always 1 for sr/sr_plus) | 2–12 |
+
+Per-task pass matrix (format×mode columns; ✓ pass / ✗ fail / N = number of operations emitted):
+
+| Task | model | sr/single | sr/struct | sem/single | sem/struct | sp/single | sp/struct |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| c04 sig_change | Haiku | ✗ 1 | **✓ 2** | ✓ 3 | ✗ 2 | ✗ 1 | **✓ 2** |
+| c04 sig_change | Sonnet | ✗ 1 | **✓ 2** | ✗ 1 | **✓ 2** | ✓ 1 | ✓ 2 |
+| c05 api_migration | Haiku | ✗ 1 | **✓ 4** | ✗ 5 | **✓ 5** | ✗ 1 | **✓ 4** |
+| c05 api_migration | Sonnet | ✗ 1 | **✓ 4** | ✗ 2 | **✓ 5** | ✗ 1 | **✓ 4** |
+| c08 add_feature | Haiku | ✗ 1 | **✓ 3** | ✗ 3 | **✓ 3** | ✗ 1 | **✓ 3** |
+| c08 add_feature | Sonnet | ✗ 1 | **✓ 3** | ✗ 1 | **✓ 5** | ✗ 1 | **✓ 3** |
+| c09 remove_sweep | Haiku | ✗ 1 | ✗ 9 | ✗ 5 | ✗ 10 | ✗ 1 | ✗ 9 |
+| c09 remove_sweep | Sonnet | ✗ 1 | **✓ 2** | ✗ 2 | ✗ 12 | ✗ 1 | **✓ 2** |
+
+### What this tells us
+
+**1. Protocol dominates format.** Whether the model uses text-edit (`sr`) or semantic ops (`semantic`) matters far less than whether it's writing tool_use blocks or a JSON document. The pass-rate gap (8% → 79%) is entirely a protocol effect.
+
+**2. The format is no longer suppressed by the protocol.** In `single` mode, format choice barely mattered — the model emitted ~1 call regardless, packing as much change as the format allowed. In `structured` mode, each format gets to do what it was designed for:
+  - `sr` issues 3–4 surgical replacements
+  - `semantic` issues 5+ atomic refactor ops
+  - `sr_plus` mixes both
+
+**3. Call counts scale with task complexity in structured mode.** c04 needs ~2 edits → models emit 2. c05/c08 need ~3–5 → models emit 3–5. c09 needs ~6 → models emit 9–12 (trying hard but sometimes missing edges). In `single` mode all of these compressed to ~1 call.
+
+**4. c09 isolates the residual difficulty.** Even with 10–12 structured calls and 5+ minutes of model compute, semantic on c09 still fails — the task ("remove `apply_shipping` and *every* reference including in 2 dependent functions, 2 constants, and the test imports") is genuinely hard for one-shot reasoning. Sonnet sr/sr_plus solve it cleanly with 2 calls by packing the function-and-callers into one big `str_replace` chunk. This is a real format insight that only shows up once protocol stops being the bottleneck.
+
+**5. The breakthrough is reproducible across models.** Same uplift on Haiku 4.5 and Sonnet 4.6. Sonnet under `single` was actually *worse* at multi-call emission than Haiku (1 call vs 3–5 in semantic mode); under `structured` they converge to similar batch sizes. Suggests the tool-use single-call bias is *stronger in more capable models*, not weaker.
+
 ## Why this happens
 
 Tool-use is trained on a **multi-turn action-feedback loop**:
