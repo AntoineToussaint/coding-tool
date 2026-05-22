@@ -7,11 +7,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agent_eval import ModelClient, RunRecord, ToolCall, ToolResult, Transcript, TurnUsage
+
 from coding_tool.bench.oracle import run_oracle
 from coding_tool.bench.task import materialize
 from coding_tool.formats.base import EditFormat
-from coding_tool.models.base import ModelClient, Transcript
-from coding_tool.types import RunRecord, TaskSpec, ToolCall, ToolResult, TurnUsage
+from coding_tool.types import TaskSpec
 
 
 _READ_ONLY_TOOLS = {"view_file", "list_files", "done"}
@@ -190,15 +191,15 @@ def run_trial(
     return RunRecord(
         task_id=task.task_id,
         model=model.name,
-        edit_format=fmt.name,
+        condition=fmt.name,
         passed=oracle.passed,
         turns=turns,
         tool_calls=tool_calls,
         invalid_tool_calls=invalid_tool_calls,
         usage=total_usage,
         latency_seconds=latency,
-        oracle_stdout=oracle.stdout[-2000:],
-        oracle_stderr=oracle.stderr[-2000:],
+        stdout=oracle.stdout[-2000:],
+        stderr=oracle.stderr[-2000:],
         error=error,
         transcript_path=transcript_path,
     )
@@ -268,7 +269,7 @@ def run_structured(
     except Exception as e:  # noqa: BLE001
         latency = time.monotonic() - t0
         return RunRecord(
-            task_id=task.task_id, model=model.name, edit_format=fmt.name,
+            task_id=task.task_id, model=model.name, condition=fmt.name,
             passed=False, turns=1, tool_calls=0, invalid_tool_calls=0,
             usage=TurnUsage(), latency_seconds=latency,
             error=f"model_error: {type(e).__name__}: {e}",
@@ -332,11 +333,11 @@ def run_structured(
         transcript_path = str(tp)
 
     return RunRecord(
-        task_id=task.task_id, model=model.name, edit_format=fmt.name,
+        task_id=task.task_id, model=model.name, condition=fmt.name,
         passed=oracle.passed, turns=1,
         tool_calls=tool_calls, invalid_tool_calls=invalid,
         usage=msg.usage, latency_seconds=latency,
-        oracle_stdout=oracle.stdout[-2000:], oracle_stderr=oracle.stderr[-2000:],
+        stdout=oracle.stdout[-2000:], stderr=oracle.stderr[-2000:],
         error=error, transcript_path=transcript_path,
     )
 
@@ -480,7 +481,7 @@ def run_single_shot(
         return RunRecord(
             task_id=task.task_id,
             model=model.name,
-            edit_format=fmt.name,
+            condition=fmt.name,
             passed=False,
             turns=1,
             tool_calls=0,
@@ -546,15 +547,15 @@ def run_single_shot(
     return RunRecord(
         task_id=task.task_id,
         model=model.name,
-        edit_format=fmt.name,
+        condition=fmt.name,
         passed=oracle.passed,
         turns=1,
         tool_calls=tool_calls,
         invalid_tool_calls=invalid,
         usage=msg.usage,
         latency_seconds=latency,
-        oracle_stdout=oracle.stdout[-2000:],
-        oracle_stderr=oracle.stderr[-2000:],
+        stdout=oracle.stdout[-2000:],
+        stderr=oracle.stderr[-2000:],
         error=error,
         transcript_path=transcript_path,
     )

@@ -12,14 +12,14 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
+from agent_eval import MODELS, ModelClient, RunRecord, make_client
+from agent_eval.models.anthropic_client import ANTHROPIC_MODELS
+from agent_eval.models.openai_client import OPENAI_MODELS
+from agent_eval.reports import write_csv, write_markdown
+
 from coding_tool.bench import discover_tasks, load_task, run_trial
 from coding_tool.bench.runner import run_single_shot, run_structured
-from coding_tool.bench.report import write_csv, write_markdown
 from coding_tool.formats import FORMAT_REGISTRY
-from coding_tool.models.anthropic_client import ANTHROPIC_MODELS, make_client as make_anthropic
-from coding_tool.models.openai_client import OPENAI_MODELS, make_client as make_openai
-from coding_tool.models.base import ModelClient
-from coding_tool.types import RunRecord
 
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -43,14 +43,9 @@ def _main_callback() -> None:
 
 
 def _make_client(model: str) -> ModelClient:
-    if model in ANTHROPIC_MODELS:
-        c = make_anthropic(ANTHROPIC_MODELS[model])
-    elif model in OPENAI_MODELS:
-        c = make_openai(OPENAI_MODELS[model])
-    else:
+    if model not in MODELS:
         raise typer.BadParameter(f"unknown model: {model}")
-    c.name = model
-    return c
+    return make_client(model)
 
 
 @app.command("list-formats")
@@ -146,7 +141,7 @@ def sweep(
     model_list = [m.strip() for m in models.split(",") if m.strip()]
     fmt_list = [f.strip() for f in formats.split(",") if f.strip()]
     for m in model_list:
-        if m not in ANTHROPIC_MODELS and m not in OPENAI_MODELS:
+        if m not in MODELS:
             raise typer.BadParameter(f"unknown model: {m}")
     for f in fmt_list:
         if f not in FORMAT_REGISTRY:
@@ -223,7 +218,7 @@ def _resolve_task(task: str, tasks_dir: Path) -> "TaskSpec":  # type: ignore[nam
 
 
 def _print_record(rec: RunRecord) -> None:
-    t = Table(title=f"{rec.task_id} | {rec.model} | {rec.edit_format}")
+    t = Table(title=f"{rec.task_id} | {rec.model} | {rec.condition}")
     t.add_column("metric")
     t.add_column("value")
     t.add_row("passed", "[green]yes[/green]" if rec.passed else "[red]no[/red]")
@@ -238,12 +233,12 @@ def _print_record(rec: RunRecord) -> None:
     if rec.transcript_path:
         t.add_row("transcript", rec.transcript_path)
     console.print(t)
-    if not rec.passed and rec.oracle_stdout:
+    if not rec.passed and rec.stdout:
         console.print("[dim]--- oracle stdout (tail) ---[/dim]")
-        console.print(rec.oracle_stdout[-1500:])
-    if not rec.passed and rec.oracle_stderr:
+        console.print(rec.stdout[-1500:])
+    if not rec.passed and rec.stderr:
         console.print("[dim]--- oracle stderr (tail) ---[/dim]")
-        console.print(rec.oracle_stderr[-1500:])
+        console.print(rec.stderr[-1500:])
 
 
 if __name__ == "__main__":
